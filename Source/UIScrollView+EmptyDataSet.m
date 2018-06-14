@@ -37,6 +37,7 @@
 
 @property (nonatomic, assign) CGFloat verticalOffset;
 @property (nonatomic, assign) CGFloat verticalSpace;
+@property (nonatomic, assign) DZNEmptyDataSetVerticalAnchorLocation verticalAnchorLocation;
 
 @property (nonatomic, assign) BOOL fadeInOnDisplay;
 
@@ -145,7 +146,7 @@ static char const * const kEmptyDataSetView =       "emptyDataSetView";
         
         UICollectionView *collectionView = (UICollectionView *)self;
         id <UICollectionViewDataSource> dataSource = collectionView.dataSource;
-
+        
         NSInteger sections = 1;
         
         if (dataSource && [dataSource respondsToSelector:@selector(numberOfSectionsInCollectionView:)]) {
@@ -281,6 +282,15 @@ static char const * const kEmptyDataSetView =       "emptyDataSetView";
         return [self.emptyDataSetSource spaceHeightForEmptyDataSet:self];
     }
     return 0.0;
+}
+
+- (DZNEmptyDataSetVerticalAnchorLocation)dzn_verticalAnchorLocation
+{
+    if (self.emptyDataSetSource && [self.emptyDataSetSource respondsToSelector:@selector(verticalAnchorLocationForEmptyDataSet:)]) {
+        return [self.emptyDataSetSource verticalAnchorLocationForEmptyDataSet:self];
+    }
+    
+    return DZNEmptyDataSetVerticalAnchorLocationCenter;
 }
 
 
@@ -448,9 +458,6 @@ static char const * const kEmptyDataSetView =       "emptyDataSetView";
         
         DZNEmptyDataSetView *view = self.emptyDataSetView;
         
-        // Configure empty dataset fade in display
-        view.fadeInOnDisplay = [self dzn_shouldFadeIn];
-        
         if (!view.superview) {
             // Send the view all the way to the back, in case a header and/or footer is present, as well as for sectionHeaders or any other content
             if (([self isKindOfClass:[UITableView class]] || [self isKindOfClass:[UICollectionView class]]) && self.subviews.count > 1) {
@@ -522,6 +529,9 @@ static char const * const kEmptyDataSetView =       "emptyDataSetView";
         // Configure offset
         view.verticalOffset = [self dzn_verticalOffset];
         
+        // Configure anchor location
+        view.verticalAnchorLocation = [self dzn_verticalAnchorLocation];
+        
         // Configure the empty dataset view
         view.backgroundColor = [self dzn_dataSetBackgroundColor];
         view.hidden = NO;
@@ -530,10 +540,13 @@ static char const * const kEmptyDataSetView =       "emptyDataSetView";
         // Configure empty dataset userInteraction permission
         view.userInteractionEnabled = [self dzn_isTouchAllowed];
         
+        // Configure empty dataset fade in display
+        view.fadeInOnDisplay = [self dzn_shouldFadeIn];
+        
         [view setupConstraints];
         
         [UIView performWithoutAnimation:^{
-            [view layoutIfNeeded];
+            [view layoutIfNeeded];            
         }];
         
         // Configure scroll permission
@@ -735,8 +748,11 @@ Class dzn_baseClassToSwizzleForTarget(id target)
 
 - (void)didMoveToSuperview
 {
-    CGRect superviewBounds = self.superview.bounds;
-    self.frame = CGRectMake(0.0, 0.0, CGRectGetWidth(superviewBounds), CGRectGetHeight(superviewBounds));
+    
+    CGRect frame = self.superview.bounds;
+    frame.size.height += ((UIScrollView *)self.superview).contentOffset.y;
+    frame.origin.y = 0;
+    self.frame = frame;
     
     void(^fadeInBlock)(void) = ^{_contentView.alpha = 1.0;};
     
@@ -919,17 +935,32 @@ Class dzn_baseClassToSwizzleForTarget(id target)
 - (void)setupConstraints
 {
     // First, configure the content view constaints
-    // The content view must alway be centered to its superview
+    // The content view must always be centered to its superview
     NSLayoutConstraint *centerXConstraint = [self equallyRelatedConstraintWithView:self.contentView attribute:NSLayoutAttributeCenterX];
-    NSLayoutConstraint *centerYConstraint = [self equallyRelatedConstraintWithView:self.contentView attribute:NSLayoutAttributeCenterY];
+    NSLayoutConstraint *verticalAnchorConstraint = nil;
+    
+    switch (self.verticalAnchorLocation) {
+        case DZNEmptyDataSetVerticalAnchorLocationCenter: {
+            verticalAnchorConstraint = [self equallyRelatedConstraintWithView:self.contentView attribute:NSLayoutAttributeCenterY];
+            break;
+        }
+        case DZNEmptyDataSetVerticalAnchorLocationTop: {
+            verticalAnchorConstraint = [self equallyRelatedConstraintWithView:self.contentView attribute:NSLayoutAttributeTop];
+            break;
+        }
+        case DZNEmptyDataSetVerticalAnchorLocationBottom: {
+            verticalAnchorConstraint = [self equallyRelatedConstraintWithView:self.contentView attribute:NSLayoutAttributeBottom];
+            break;
+        }
+    }
     
     [self addConstraint:centerXConstraint];
-    [self addConstraint:centerYConstraint];
+    [self addConstraint:verticalAnchorConstraint];
     [self addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|[contentView]|" options:0 metrics:nil views:@{@"contentView": self.contentView}]];
     
     // When a custom offset is available, we adjust the vertical constraints' constants
     if (self.verticalOffset != 0 && self.constraints.count > 0) {
-        centerYConstraint.constant = self.verticalOffset;
+        verticalAnchorConstraint.constant = self.verticalOffset;
     }
     
     // If applicable, set the custom view's constraints
